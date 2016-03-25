@@ -1,0 +1,286 @@
+#!/usr/bin/env php
+<?php
+    
+    // include config
+    require("../includes/config.php");
+
+    // ensure proper command line arguments
+    if ($argc != 2)
+    {
+        echo("Usage: ./import /path/to/yourfile.json\n");
+        return;
+    }
+    
+    // filename variable for readability
+    $filename = $argv[1];
+    
+    // check the file exists and is readable
+    if (is_readable($filename))
+    {
+        
+        // read file to string as required by json decode PHP function
+        $jsonstring = file_get_contents($filename);
+        
+        // check that file read properly
+        if ($jsonstring == false)
+        {
+            echo("There was an error opening the file.\n");
+            return;
+        }
+        
+        // decode json string
+        $json = json_decode($jsonstring, true);
+        
+        // make sure json decoded properly
+        if ($json == false)
+        {
+            echo("There was an error decoding. Ensure you are providing a JSON file.\n");
+            return;
+        }
+        
+        // if file opened proceed
+        else
+        {
+            
+            // length of json
+            $jsonSize = count($json);
+            
+            // track number of attempts to open particular url on google's server
+            $urlattempts = 1;
+            
+            // track number of attempts for each query to google's geocode server
+            $attempts = 1;
+            
+            // track number of consecutive overquerylimit messages
+            $consecutiveQueryLimits = 1;
+            
+            // keep reading lines until end of file
+            for ($i = 0; $i < $jsonSize; $i++)
+            {
+                
+                // list of API keys needed to prevent getting locked out after multiple requests
+                $keys = [
+                    "AIzaSyD8gT9PbE9jLic9xCBGVYdzj9Cu9ozeIFs",
+                    "AIzaSyBhDKUJSpL1Vq-LGLj8yHWd3uf-YSYPRlA",
+                    "AIzaSyAaMFJmok-QkEtrXiFdyKRI3dCfZybytQQ",
+                    "AIzaSyCF2AeiaVe1hYQAn0dEIfFyfTbRgJmDFYo",
+                    "AIzaSyCRU7RshYfyInAYgE_xr97RnKm8pxqEV9o",
+                    ];
+                    
+                // get random key for request
+                $randomkey = $keys[array_rand($keys)];
+                
+                // assign regional code for search based on country
+                $regionalCode = getRegion($json[$i]["country"]);
+                
+                // build address for URL request to Google to get the geo coordinates for each address
+                $address = $json[$i]["address_line1"] . ",+" . $json[$i]["city"] . 
+                    ",+" . $json[$i]["state"] . "&region=" . $regionalCode;
+                
+                // replace spaces in address with pluses for formatting for url
+                // http://stackoverflow.com/questions/12704613/php-str-replace-replace-spaces-with-underscores
+                $address = preg_replace('/\s+/', '+', $address);
+                
+                // make url for requesting coordinates
+                $url = "https://maps.googleapis.com/maps/api/geocode/json?address=" . $address . "&key=$randomkey" . "&sensor=false";
+
+                // read google's json response to string as required by json decode PHP function
+                $placejsonstring = file_get_contents($url);
+                
+                // make sure json was read properly
+                if ($placejsonstring == false)
+                {
+                    
+                    if ($urlattempts >= 5)
+                    {
+                        echo("Google's server is continuously not responding.  Try later.\n");
+                        return;
+                    }
+                    
+                    // tell user 
+                    echo("There was an error opening the response for $url\nAttempt: $urlattempts.\n\n");
+                    
+                    // track number of attempts
+                    $urlattempts++;
+                    
+                    // try again
+                    $i--;
+                    continue;
+                }
+                
+                // decode outputted json
+                $placejson = json_decode($placejsonstring);
+                
+                // make sure json decoded properly
+                if ($placejson == false)
+                {
+                    echo("There was an error reading the response for $url.\n Check to ensure Google has not changed their format.\n\n");
+                    return;
+                }
+                
+                // if over query limit, try again (might have been blocked by Google for rapid requests due to current traffic)
+                if ($placejson->status === "OVER_QUERY_LIMIT")
+                {
+
+                    // reset URL attempts since we got a response
+                    $urlattempts = 1;
+
+                    // if over 3 total requests for one url, probably error with that particular address; move to next
+                    if ($attempts > 3)
+                    {
+                        print("$url\nGeocode Failed.\n\n");
+                        
+                        // insert without lat / long if continually get over query limit (tests show no amount of delay fixes this after multiple failures)
+                        // sustained over query limit failures appear to actually indicate a non-match as opposed to throttling
+                        CS50::query("INSERT INTO military_installations (branch, directory, installation, title,
+                            address_line1, address_line2, address_line3, address_line4, city, state, country, zip_code,
+                            commercial_phone1, commercial_phone2, commercial_phone3, commercial_fax, DSN_phone, DSN_fax,
+                            web_site_address1, web_site_address2, web_site_address3) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 
+                            $json[$i]["branch"], $json[$i]["directory"], $json[$i]["installation"], $json[$i]["title"],
+                            $json[$i]["address_line1"], $json[$i]["address_line2"], $json[$i]["address_line3"],
+                            $json[$i]["address_line4"], $json[$i]["city"], $json[$i]["state"], $json[$i]["country"],
+                            $json[$i]["zip_code"], $json[$i]["commercial_phone1"], $json[$i]["commercial_phone2"],
+                            $json[$i]["commercial_phone3"], $json[$i]["commercial_fax"], $json[$i]["DSN_phone"], $json[$i]["DSN_fax"],
+                            $json[$i]["web_site_address1"], $json[$i]["web_site_address2"], $json[$i]["web_site_address3"]);
+                        
+                        // reset attempts
+                        $attempts = 1;
+                        
+                        // track number of times you have had to skip to next; if excessive probably means you are truly over query limit
+                        $consecutiveQueryLimits++;
+                        
+                        continue;
+                    }
+                    
+                    // if you have gotten multiple over query limits in a row might actually mean you are over Google's daily limit
+                    // note that this will happen if you exceed their daily limit for free and have not associated payment with your API key
+                    // (as will occur when testing this--I have de-associated payment from my API keys above so I don't have a large bill to Google)
+                    if ($consecutiveQueryLimits >= 5)
+                    {
+                        print("You appear to be over Google's daily request limit. Add a payment method to your API key at\n
+                            https://developers.google.com/\n or try tomorrow.\n\n");
+                    }
+                    
+                    // tell user, print attempts to console
+                    print("Over query limit for $url.\nThis is possibly due to rapid requests.  Attempt $attempts.\n\n");
+                    
+                    // pause to give Google's servers a chance to catch up, in seconds
+                    sleep(2);
+                    
+                    // try again
+                    $attempts++;
+                    $i--;
+                    continue;
+                }
+                
+                // if geocode request was successful, include lat and long with SQL update
+                else if ($placejson->status === "OK")
+                {
+                    
+                    // reset URL attempts since we got a response
+                    $urlattempts = 1;
+                    
+                    // remember lat and long
+                    $lat = $placejson->results[0]->geometry->location->lat;
+                    $lng = $placejson->results[0]->geometry->location->lng;
+                    
+                    CS50::query("INSERT INTO military_installations (branch, directory, installation, title,
+                        address_line1, address_line2, address_line3, address_line4, city, state, country, zip_code,
+                        commercial_phone1, commercial_phone2, commercial_phone3, commercial_fax, DSN_phone, DSN_fax,
+                        web_site_address1, web_site_address2, web_site_address3, latitude, longitude) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 
+                        $json[$i]["branch"], $json[$i]["directory"], $json[$i]["installation"], $json[$i]["title"],
+                        $json[$i]["address_line1"], $json[$i]["address_line2"], $json[$i]["address_line3"],
+                        $json[$i]["address_line4"], $json[$i]["city"], $json[$i]["state"], $json[$i]["country"],
+                        $json[$i]["zip_code"], $json[$i]["commercial_phone1"], $json[$i]["commercial_phone2"],
+                        $json[$i]["commercial_phone3"], $json[$i]["commercial_fax"], $json[$i]["DSN_phone"], $json[$i]["DSN_fax"],
+                        $json[$i]["web_site_address1"], $json[$i]["web_site_address2"], $json[$i]["web_site_address3"], $lat, $lng);
+                        
+                    // reset number of requests for next place
+                    $attempts = 1;
+                    
+                    // reset consecutive over query limits
+                    $consecutiveQueryLimits = 1;
+                    
+                }
+                
+                // if geocode request was unsuccessful, do not update lat and long
+                else
+                {
+                    
+                    // reset URL attempts since we got a response
+                    $urlattempts = 1;
+                    
+                    // print error type to console
+                    print($placejson->status . " for " . $url . "\n\n");
+                    
+                    CS50::query("INSERT INTO military_installations (branch, directory, installation, title,
+                        address_line1, address_line2, address_line3, address_line4, city, state, country, zip_code,
+                        commercial_phone1, commercial_phone2, commercial_phone3, commercial_fax, DSN_phone, DSN_fax,
+                        web_site_address1, web_site_address2, web_site_address3) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 
+                        $json[$i]["branch"], $json[$i]["directory"], $json[$i]["installation"], $json[$i]["title"],
+                        $json[$i]["address_line1"], $json[$i]["address_line2"], $json[$i]["address_line3"],
+                        $json[$i]["address_line4"], $json[$i]["city"], $json[$i]["state"], $json[$i]["country"],
+                        $json[$i]["zip_code"], $json[$i]["commercial_phone1"], $json[$i]["commercial_phone2"],
+                        $json[$i]["commercial_phone3"], $json[$i]["commercial_fax"], $json[$i]["DSN_phone"], $json[$i]["DSN_fax"],
+                        $json[$i]["web_site_address1"], $json[$i]["web_site_address2"], $json[$i]["web_site_address3"]);
+                        
+                    // reset number of requests for next place
+                    $attempts = 1;
+                    
+                    // reset consecutive over query limits
+                    $consecutiveQueryLimits = 1;
+                    
+                }
+            }
+            
+            // report success
+            echo("Data loaded.\n");
+        }
+    }
+    
+    // if unreadable or does not exist; stop and correct user
+    else
+    {
+        echo("Please supply a valid and readable file.\n");
+    }
+    
+    // attempt to match countries to their country code for inclusion in search parameters (more accuracy)
+    function getRegion($country)
+    {
+        if ($country == "Puerto Rico")
+        {
+            return "pr";
+        }
+        
+        else if ($country == "Germany")
+        {
+            return "de";
+        }
+        
+        else if ($country == "Spain")
+        {
+            return "es";
+        }
+        
+        else if ($country == "Italy")
+        {
+            return "it";
+        }
+        
+        else if ($country == "Korea, Republic Of")
+        {
+            return "kr";
+        }
+        
+        else if ($country == "United Kingdom")
+        {
+            return "uk";
+        }
+        
+        else
+        {
+            return "us";
+        }
+    }
+
+?>
