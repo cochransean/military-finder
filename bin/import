@@ -59,13 +59,7 @@
             {
                 
                 // list of API keys needed to prevent getting locked out after multiple requests
-                $keys = [
-                    "AIzaSyD8gT9PbE9jLic9xCBGVYdzj9Cu9ozeIFs",
-                    "AIzaSyBhDKUJSpL1Vq-LGLj8yHWd3uf-YSYPRlA",
-                    "AIzaSyAaMFJmok-QkEtrXiFdyKRI3dCfZybytQQ",
-                    "AIzaSyCF2AeiaVe1hYQAn0dEIfFyfTbRgJmDFYo",
-                    "AIzaSyCRU7RshYfyInAYgE_xr97RnKm8pxqEV9o",
-                    ];
+                $keys = [""];
                     
                 // get random key for request
                 $randomkey = $keys[array_rand($keys)];
