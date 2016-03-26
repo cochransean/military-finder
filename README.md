@@ -7,14 +7,11 @@ MilitaryFinder is a website built on Google's Javscript Maps API that consolidat
 The military's own solutions for finding on-base services tend to be difficult to search, sometimes are buried on old websites, and do not allow users to provide feedback if phone numbers or addresses are inaccurate--leading to stale data.
 
 # Conmponents
-/bin
-Contains the script used to geocode addresses via Google's Geocode API.  I started with addresses scraped from http://www.militaryinstallations.dod.mil/, cleaned them using OpenRefine, and then geocoded them with this script.
+/bin: Contains the script used to geocode addresses via Google's Geocode API.  I started with addresses scraped from http://www.militaryinstallations.dod.mil/, cleaned them using OpenRefine, and then geocoded them with this script.
 
-/public
-Contains all JS, PHP, and HTML files for the website itself.
+/public: Contains all JS, PHP, and HTML files for the website itself.
 
-/vendor
-Contains PHP functions and dependencies, used under license.
+/vendor: Contains PHP functions and dependencies, used under license.
 
 # License
 MIT License
